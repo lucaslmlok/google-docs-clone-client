@@ -4,7 +4,7 @@ import "quill/dist/quill.snow.css";
 import { io } from "socket.io-client";
 import { useParams } from "react-router-dom";
 
-const SAVE_INTERVAL_MS = 2000;
+const SAVE_TIMEOUT_MS = 2000;
 const TOOLBAR_OPTIONS = [
   [{ header: [1, 2, 3, 4, 5, 6, false] }],
   [{ font: [] }],
@@ -21,6 +21,8 @@ const TextEditor = () => {
   const { id: documentId } = useParams();
   const [socket, setSocket] = useState();
   const [quill, setQuill] = useState();
+  const [lastEdit, setLastEdit] = useState();
+  const [lastEditTimer, setLastEditTimer] = useState();
 
   useEffect(() => {
     const s = io("http://localhost:3001");
@@ -39,14 +41,6 @@ const TextEditor = () => {
 
   useEffect(() => {
     if (!socket || !quill) return;
-    const interval = setInterval(() => {
-      socket.emit("save-document", quill.getContents());
-    }, SAVE_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [socket, quill]);
-
-  useEffect(() => {
-    if (!socket || !quill) return;
     const handler = (delta) => {
       quill.updateContents(delta);
     };
@@ -59,10 +53,24 @@ const TextEditor = () => {
     const handler = (delta, oldDelta, source) => {
       if (source !== "user") return;
       socket.emit("send-changes", delta);
+      setLastEdit(Date.now());
     };
     quill.on("text-change", handler);
     return () => quill.off("text-change", handler);
   }, [socket, quill]);
+
+  useEffect(() => {
+    if (!socket || !quill || !lastEdit) return;
+    if (lastEditTimer) clearTimeout(lastEditTimer);
+    const timerId = setTimeout(() => {
+      socket.emit("save-document", quill.getContents());
+      setLastEditTimer(null);
+    }, SAVE_TIMEOUT_MS);
+    setLastEditTimer(timerId);
+    return () => {
+      if (lastEditTimer) clearTimeout(lastEditTimer);
+    };
+  }, [socket, quill, lastEdit]);
 
   const wrapperRef = useCallback((wrapper) => {
     if (!wrapper) return;
@@ -78,7 +86,7 @@ const TextEditor = () => {
     setQuill(q);
   }, []);
 
-  return <div class="container" ref={wrapperRef}></div>;
+  return <div className="container" ref={wrapperRef}></div>;
 };
 
 export default TextEditor;
